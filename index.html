@@ -735,6 +735,14 @@
                                 <small>用于访问Google API的代理服务器地址</small>
                                 <div class="proxy-status" id="proxyStatus"></div>
                             </div>
+                            <div class="form-group">
+                                <label class="form-label" for="imageOutputMode">图片输出模式</label>
+                                <select class="form-input" id="imageOutputMode">
+                                    <option value="url">图片URL（默认）</option>
+                                    <option value="base64">Base64 Data URL</option>
+                                </select>
+                                <small>控制聊天接口返回的图片是以URL形式还是以 data:image/...;base64,... 形式输出</small>
+                            </div>
                             <div style="display: flex; gap: 12px;">
                                 <button type="button" class="btn btn-outline" onclick="testProxy()">
                                     测试代理
@@ -1540,6 +1548,11 @@
             }
         }
         
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
         function renderModels() {
             const tbody = document.getElementById('modelsTableBody');
             if (!tbody) return;
@@ -1550,32 +1563,37 @@
                 </td></tr>`;
                 return;
             }
-            tbody.innerHTML = modelsData.map(model => `
+            tbody.innerHTML = modelsData.map((model, index) => {
+                const safeId = escapeHtml(model.id);
+                const safeName = escapeHtml(model.name);
+                const safeDesc = escapeHtml(model.description);
+                return `
                 <tr>
-                    <td><code>${model.id}</code></td>
-                    <td>${model.name}</td>
-                    <td title="${model.description}">${model.description ? model.description.substring(0, 40) + '...' : ''}</td>
+                    <td><code>${safeId}</code></td>
+                    <td>${safeName}</td>
+                    <td title="${safeDesc}">${model.description ? safeDesc.substring(0, 40) + '...' : ''}</td>
                     <td>${model.context_length}</td>
                     <td>${model.max_tokens}</td>
                     <td><span class="badge ${model.is_public ? 'badge-success' : 'badge-warning'}">${model.is_public ? '公共' : '私有'}</span></td>
                     <td>
-                        <button class="btn btn-sm btn-outline btn-icon" onclick="showEditModelModal('${model.id}')" title="编辑">✏️</button>
-                        <button class="btn btn-sm btn-danger btn-icon" onclick="deleteModel('${model.id}')" title="删除">🗑️</button>
+                        <button class="btn btn-sm btn-outline btn-icon" onclick="showEditModelModalByIndex(${index})" title="编辑">✏️</button>
+                        <button class="btn btn-sm btn-danger btn-icon" onclick="deleteModelByIndex(${index})" title="删除">🗑️</button>
                     </td>
                 </tr>
-            `).join('');
+            `;
+            }).join('');
         }
 
         function showAddModelModal() {
             openModal('addModelModal');
         }
 
-        function showEditModelModal(id) {
-            const model = modelsData.find(m => m.id === id);
+        function showEditModelModalByIndex(index) {
+            const model = modelsData[index];
             if (!model) return;
             
-            document.getElementById('editModelOriginalId').value = id;
-            document.getElementById('editModelId').value = id;
+            document.getElementById('editModelOriginalId').value = model.id;
+            document.getElementById('editModelId').value = model.id;
             document.getElementById('editModelName').value = model.name || '';
             document.getElementById('editModelDesc').value = model.description || '';
             document.getElementById('editContextLength').value = model.context_length || '';
@@ -1594,7 +1612,7 @@
             };
             
             try {
-                const res = await apiFetch(`${API_BASE}/api/models/${originalId}`, {
+                const res = await apiFetch(`${API_BASE}/api/models/${encodeURIComponent(originalId)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(model)
@@ -1672,13 +1690,16 @@
          * 删除模型
          * @param {string} id - 模型ID
          */
-        async function deleteModel(id) {
+        async function deleteModelByIndex(index) {
+            const model = modelsData[index];
+            if (!model) return;
+            const id = model.id;
             if (!confirm(`确定要删除模型 "${id}" 吗？此操作不可恢复。`)) {
                 return;
             }
 
             try {
-                const res = await apiFetch(`${API_BASE}/api/models/${id}`, {
+                const res = await apiFetch(`${API_BASE}/api/models/${encodeURIComponent(id)}`, {
                     method: 'DELETE'
                 });
                 const data = await res.json();
@@ -1700,6 +1721,11 @@
                 const res = await apiFetch(`${API_BASE}/api/config`);
                 configData = await res.json();
                 document.getElementById('proxyUrl').value = configData.proxy || '';
+                const imageModeSelect = document.getElementById('imageOutputMode');
+                if (imageModeSelect) {
+                    const mode = (configData.image_output_mode || 'url');
+                    imageModeSelect.value = mode === 'base64' ? 'base64' : 'url';
+                }
                 document.getElementById('configJson').value = JSON.stringify(configData, null, 2);
             } catch (e) {
                 showToast('加载配置失败: ' + e.message, 'error');
@@ -1875,11 +1901,13 @@
 
         async function saveSettings() {
             const proxyUrl = document.getElementById('proxyUrl').value;
+            const imageModeSelect = document.getElementById('imageOutputMode');
+            const imageOutputMode = imageModeSelect ? imageModeSelect.value : 'url';
             try {
                 const res = await apiFetch(`${API_BASE}/api/config`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proxy: proxyUrl })
+                    body: JSON.stringify({ proxy: proxyUrl, image_output_mode: imageOutputMode })
                 });
                 if (!res.ok) throw new Error((await res.json()).detail);
                 showToast('设置保存成功!', 'success');
